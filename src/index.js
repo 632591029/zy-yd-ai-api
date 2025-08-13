@@ -1,7 +1,6 @@
 import { createYoga } from 'graphql-yoga'
-import { buildSchema } from 'graphql'
 
-// GraphQL Schema
+// GraphQL Schema (使用字符串模式)
 const typeDefs = `
   type Query {
     hello: String
@@ -52,7 +51,7 @@ const AI_MODELS = [
   {
     id: 'gpt-4',
     name: 'GPT-4',
-    provider: 'openai',
+    provider: 'openai', 
     description: 'OpenAI的最强模型'
   },
   {
@@ -154,20 +153,28 @@ const resolvers = {
     }
   },
   Mutation: {
-    sendMessage: async (parent, { input }, context) => {
-      console.log('🚀 SendMessage mutation called:', { 
-        model: input.model, 
-        messageLength: input.message?.length 
-      })
+    sendMessage: async (_, args, context) => {
+      console.log('🚀 SendMessage mutation called with args:', args)
       
       try {
+        const { input } = args
         const { message, model, temperature = 0.7, maxTokens = 1000 } = input
         const { env } = context
 
-        // 检查环境变量（不打印完整密钥）
-        console.log('🔑 API Keys check:', {
-          hasOpenAI: !!env.OPENAI_API_KEY,
-          hasDeepSeek: !!env.DEEPSEEK_API_KEY,
+        console.log('📝 Processing message:', {
+          model,
+          messageLength: message.length,
+          temperature,
+          maxTokens
+        })
+
+        // 检查环境变量
+        const hasOpenAI = !!env.OPENAI_API_KEY
+        const hasDeepSeek = !!env.DEEPSEEK_API_KEY
+        
+        console.log('🔑 API Keys status:', {
+          hasOpenAI,
+          hasDeepSeek,
           openaiLength: env.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
           deepseekLength: env.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
         })
@@ -178,11 +185,14 @@ const resolvers = {
           console.error('❌ Model not found:', model)
           return {
             success: false,
-            error: `不支持的模型: ${model}`
+            message: message,
+            reply: null,
+            error: `不支持的模型: ${model}`,
+            usage: null
           }
         }
 
-        console.log('📦 Using model:', modelConfig)
+        console.log('📦 Using model config:', modelConfig)
 
         let result
         if (modelConfig.provider === 'openai') {
@@ -191,7 +201,10 @@ const resolvers = {
             console.error('❌ OpenAI API Key missing')
             return {
               success: false,
-              error: 'OpenAI API Key 未配置'
+              message: message,
+              reply: null,
+              error: 'OpenAI API Key 未配置，请在Workers环境变量中设置OPENAI_API_KEY',
+              usage: null
             }
           }
           result = await callOpenAI(message, model, apiKey, temperature, maxTokens)
@@ -201,7 +214,10 @@ const resolvers = {
             console.error('❌ DeepSeek API Key missing')
             return {
               success: false,
-              error: 'DeepSeek API Key 未配置'
+              message: message,
+              reply: null,
+              error: 'DeepSeek API Key 未配置，请在Workers环境变量中设置DEEPSEEK_API_KEY',
+              usage: null
             }
           }
           result = await callDeepSeek(message, model, apiKey, temperature, maxTokens)
@@ -209,22 +225,29 @@ const resolvers = {
           console.error('❌ Unsupported provider:', modelConfig.provider)
           return {
             success: false,
-            error: `不支持的提供商: ${modelConfig.provider}`
+            message: message,
+            reply: null,
+            error: `不支持的提供商: ${modelConfig.provider}`,
+            usage: null
           }
         }
 
-        console.log('🎉 Mutation completed successfully')
+        console.log('🎉 API call completed successfully')
         return {
           success: true,
           message: message,
           reply: result.reply,
+          error: null,
           usage: result.usage
         }
       } catch (error) {
-        console.error('💥 SendMessage error:', error.message)
+        console.error('💥 SendMessage mutation error:', error)
         return {
           success: false,
-          error: error.message || '服务器内部错误'
+          message: args.input.message,
+          reply: null,
+          error: error.message || '服务器内部错误',
+          usage: null
         }
       }
     }
@@ -233,46 +256,56 @@ const resolvers = {
 
 // 创建 GraphQL Yoga 实例
 const yoga = createYoga({
-  schema: buildSchema(typeDefs),
-  rootValue: resolvers,
-  context: ({ request, env }) => {
-    console.log('🌍 Creating GraphQL context')
+  schema: typeDefs,
+  resolvers,
+  context: async ({ request, env }) => {
+    console.log('🌍 Creating GraphQL context for:', request.method)
     return { request, env }
   },
   cors: {
     origin: [
       'https://zy-yd-ai-tools.pages.dev',
       'https://2000zy.space',
-      'http://localhost:3000' // 开发环境
+      'http://localhost:3000'
     ],
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: false
   },
   graphiql: {
-    title: 'ZY-YD AI API',
+    title: 'ZY-YD AI API - GraphQL Playground',
     headerEditorEnabled: true
   }
 })
 
 export default {
   async fetch(request, env, ctx) {
-    console.log('🌐 Workers fetch:', request.method, new URL(request.url).pathname)
+    const url = new URL(request.url)
+    console.log('🌐 Workers request:', {
+      method: request.method,
+      pathname: url.pathname,
+      origin: request.headers.get('origin')
+    })
     
     try {
-      return await yoga.fetch(request, { env, ctx })
+      const response = await yoga.fetch(request, { env, ctx })
+      console.log('✅ Workers response:', response.status)
+      return response
     } catch (error) {
-      console.error('💥 Workers fetch error:', error)
+      console.error('💥 Workers error:', error)
       return new Response(
         JSON.stringify({ 
-          error: 'Workers Error', 
+          error: 'Workers Internal Error', 
           message: error.message,
-          stack: error.stack 
+          stack: error.stack?.split('\n').slice(0, 5)
         }), 
         { 
           status: 500, 
           headers: { 
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization'
           } 
         }
       )
