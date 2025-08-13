@@ -1,44 +1,158 @@
-import { createYoga } from 'graphql-yoga'
+import { createYoga, createSchema } from 'graphql-yoga'
 
-// GraphQL Schema (使用字符串模式)
-const typeDefs = `
-  type Query {
-    hello: String
-    models: [AIModel!]!
-  }
+// GraphQL Schema
+const schema = createSchema({
+  typeDefs: `
+    type Query {
+      hello: String
+      models: [AIModel!]!
+    }
 
-  type Mutation {
-    sendMessage(input: ChatInput!): ChatResponse!
-  }
+    type Mutation {
+      sendMessage(input: ChatInput!): ChatResponse!
+    }
 
-  type AIModel {
-    id: String!
-    name: String!
-    provider: String!
-    description: String
-  }
+    type AIModel {
+      id: String!
+      name: String!
+      provider: String!
+      description: String
+    }
 
-  input ChatInput {
-    message: String!
-    model: String!
-    temperature: Float
-    maxTokens: Int
-  }
+    input ChatInput {
+      message: String!
+      model: String!
+      temperature: Float
+      maxTokens: Int
+    }
 
-  type ChatResponse {
-    success: Boolean!
-    message: String
-    reply: String
-    error: String
-    usage: Usage
-  }
+    type ChatResponse {
+      success: Boolean!
+      message: String
+      reply: String
+      error: String
+      usage: Usage
+    }
 
-  type Usage {
-    promptTokens: Int
-    completionTokens: Int
-    totalTokens: Int
+    type Usage {
+      promptTokens: Int
+      completionTokens: Int
+      totalTokens: Int
+    }
+  `,
+  resolvers: {
+    Query: {
+      hello: () => {
+        console.log('📞 Hello query called')
+        return 'Hello from ZY-YD AI API!'
+      },
+      models: () => {
+        console.log('📋 Models query called')
+        return AI_MODELS
+      }
+    },
+    Mutation: {
+      sendMessage: async (_, args, context) => {
+        console.log('🚀 SendMessage mutation called with args:', args)
+        
+        try {
+          const { input } = args
+          const { message, model, temperature = 0.7, maxTokens = 1000 } = input
+          const { env } = context
+
+          console.log('📝 Processing message:', {
+            model,
+            messageLength: message.length,
+            temperature,
+            maxTokens
+          })
+
+          // 检查环境变量
+          const hasOpenAI = !!env.OPENAI_API_KEY
+          const hasDeepSeek = !!env.DEEPSEEK_API_KEY
+          
+          console.log('🔑 API Keys status:', {
+            hasOpenAI,
+            hasDeepSeek,
+            openaiLength: env.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
+            deepseekLength: env.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
+          })
+
+          // 根据模型选择 API
+          const modelConfig = AI_MODELS.find(m => m.id === model)
+          if (!modelConfig) {
+            console.error('❌ Model not found:', model)
+            return {
+              success: false,
+              message: message,
+              reply: null,
+              error: `不支持的模型: ${model}`,
+              usage: null
+            }
+          }
+
+          console.log('📦 Using model config:', modelConfig)
+
+          let result
+          if (modelConfig.provider === 'openai') {
+            const apiKey = env.OPENAI_API_KEY
+            if (!apiKey) {
+              console.error('❌ OpenAI API Key missing')
+              return {
+                success: false,
+                message: message,
+                reply: null,
+                error: 'OpenAI API Key 未配置，请在Workers环境变量中设置OPENAI_API_KEY',
+                usage: null
+              }
+            }
+            result = await callOpenAI(message, model, apiKey, temperature, maxTokens)
+          } else if (modelConfig.provider === 'deepseek') {
+            const apiKey = env.DEEPSEEK_API_KEY
+            if (!apiKey) {
+              console.error('❌ DeepSeek API Key missing')
+              return {
+                success: false,
+                message: message,
+                reply: null,
+                error: 'DeepSeek API Key 未配置，请在Workers环境变量中设置DEEPSEEK_API_KEY',
+                usage: null
+              }
+            }
+            result = await callDeepSeek(message, model, apiKey, temperature, maxTokens)
+          } else {
+            console.error('❌ Unsupported provider:', modelConfig.provider)
+            return {
+              success: false,
+              message: message,
+              reply: null,
+              error: `不支持的提供商: ${modelConfig.provider}`,
+              usage: null
+            }
+          }
+
+          console.log('🎉 API call completed successfully')
+          return {
+            success: true,
+            message: message,
+            reply: result.reply,
+            error: null,
+            usage: result.usage
+          }
+        } catch (error) {
+          console.error('💥 SendMessage mutation error:', error)
+          return {
+            success: false,
+            message: args.input.message,
+            reply: null,
+            error: error.message || '服务器内部错误',
+            usage: null
+          }
+        }
+      }
+    }
   }
-`
+})
 
 // AI 模型配置
 const AI_MODELS = [
@@ -140,124 +254,9 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens
   }
 }
 
-// GraphQL Resolvers
-const resolvers = {
-  Query: {
-    hello: () => {
-      console.log('📞 Hello query called')
-      return 'Hello from ZY-YD AI API!'
-    },
-    models: () => {
-      console.log('📋 Models query called')
-      return AI_MODELS
-    }
-  },
-  Mutation: {
-    sendMessage: async (_, args, context) => {
-      console.log('🚀 SendMessage mutation called with args:', args)
-      
-      try {
-        const { input } = args
-        const { message, model, temperature = 0.7, maxTokens = 1000 } = input
-        const { env } = context
-
-        console.log('📝 Processing message:', {
-          model,
-          messageLength: message.length,
-          temperature,
-          maxTokens
-        })
-
-        // 检查环境变量
-        const hasOpenAI = !!env.OPENAI_API_KEY
-        const hasDeepSeek = !!env.DEEPSEEK_API_KEY
-        
-        console.log('🔑 API Keys status:', {
-          hasOpenAI,
-          hasDeepSeek,
-          openaiLength: env.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
-          deepseekLength: env.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
-        })
-
-        // 根据模型选择 API
-        const modelConfig = AI_MODELS.find(m => m.id === model)
-        if (!modelConfig) {
-          console.error('❌ Model not found:', model)
-          return {
-            success: false,
-            message: message,
-            reply: null,
-            error: `不支持的模型: ${model}`,
-            usage: null
-          }
-        }
-
-        console.log('📦 Using model config:', modelConfig)
-
-        let result
-        if (modelConfig.provider === 'openai') {
-          const apiKey = env.OPENAI_API_KEY
-          if (!apiKey) {
-            console.error('❌ OpenAI API Key missing')
-            return {
-              success: false,
-              message: message,
-              reply: null,
-              error: 'OpenAI API Key 未配置，请在Workers环境变量中设置OPENAI_API_KEY',
-              usage: null
-            }
-          }
-          result = await callOpenAI(message, model, apiKey, temperature, maxTokens)
-        } else if (modelConfig.provider === 'deepseek') {
-          const apiKey = env.DEEPSEEK_API_KEY
-          if (!apiKey) {
-            console.error('❌ DeepSeek API Key missing')
-            return {
-              success: false,
-              message: message,
-              reply: null,
-              error: 'DeepSeek API Key 未配置，请在Workers环境变量中设置DEEPSEEK_API_KEY',
-              usage: null
-            }
-          }
-          result = await callDeepSeek(message, model, apiKey, temperature, maxTokens)
-        } else {
-          console.error('❌ Unsupported provider:', modelConfig.provider)
-          return {
-            success: false,
-            message: message,
-            reply: null,
-            error: `不支持的提供商: ${modelConfig.provider}`,
-            usage: null
-          }
-        }
-
-        console.log('🎉 API call completed successfully')
-        return {
-          success: true,
-          message: message,
-          reply: result.reply,
-          error: null,
-          usage: result.usage
-        }
-      } catch (error) {
-        console.error('💥 SendMessage mutation error:', error)
-        return {
-          success: false,
-          message: args.input.message,
-          reply: null,
-          error: error.message || '服务器内部错误',
-          usage: null
-        }
-      }
-    }
-  }
-}
-
 // 创建 GraphQL Yoga 实例
 const yoga = createYoga({
-  schema: typeDefs,
-  resolvers,
+  schema,
   context: async ({ request, env }) => {
     console.log('🌍 Creating GraphQL context for:', request.method)
     return { request, env }
