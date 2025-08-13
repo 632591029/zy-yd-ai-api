@@ -6,6 +6,7 @@ const schema = createSchema({
     type Query {
       hello: String
       models: [AIModel!]!
+      debug: DebugInfo
     }
 
     type Mutation {
@@ -17,6 +18,14 @@ const schema = createSchema({
       name: String!
       provider: String!
       description: String
+    }
+
+    type DebugInfo {
+      hasOpenAI: Boolean!
+      hasDeepSeek: Boolean!
+      openaiLength: Int!
+      deepseekLength: Int!
+      envKeys: [String!]!
     }
 
     input ChatInput {
@@ -49,6 +58,24 @@ const schema = createSchema({
       models: () => {
         console.log('📋 Models query called')
         return AI_MODELS
+      },
+      debug: (_, __, context) => {
+        const { env } = context
+        const envKeys = Object.keys(env || {})
+        
+        console.log('🔍 Debug info requested:', {
+          hasOpenAI: !!env?.OPENAI_API_KEY,
+          hasDeepSeek: !!env?.DEEPSEEK_API_KEY,
+          envKeys
+        })
+        
+        return {
+          hasOpenAI: !!env?.OPENAI_API_KEY,
+          hasDeepSeek: !!env?.DEEPSEEK_API_KEY,
+          openaiLength: env?.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
+          deepseekLength: env?.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0,
+          envKeys
+        }
       }
     },
     Mutation: {
@@ -67,15 +94,16 @@ const schema = createSchema({
             maxTokens
           })
 
-          // 检查环境变量
-          const hasOpenAI = !!env.OPENAI_API_KEY
-          const hasDeepSeek = !!env.DEEPSEEK_API_KEY
-          
-          console.log('🔑 API Keys status:', {
-            hasOpenAI,
-            hasDeepSeek,
-            openaiLength: env.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
-            deepseekLength: env.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
+          // 详细的环境变量检查
+          console.log('🔑 Environment analysis:', {
+            envType: typeof env,
+            envKeys: Object.keys(env || {}),
+            hasOpenAI: !!env?.OPENAI_API_KEY,
+            hasDeepSeek: !!env?.DEEPSEEK_API_KEY,
+            openaiType: typeof env?.OPENAI_API_KEY,
+            deepseekType: typeof env?.DEEPSEEK_API_KEY,
+            openaiLength: env?.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
+            deepseekLength: env?.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
           })
 
           // 根据模型选择 API
@@ -95,27 +123,39 @@ const schema = createSchema({
 
           let result
           if (modelConfig.provider === 'openai') {
-            const apiKey = env.OPENAI_API_KEY
+            const apiKey = env?.OPENAI_API_KEY
+            console.log('🔍 OpenAI Key check:', {
+              exists: !!apiKey,
+              type: typeof apiKey,
+              length: apiKey ? apiKey.length : 0,
+              startsWithSk: apiKey ? apiKey.startsWith('sk-') : false
+            })
+            
             if (!apiKey) {
-              console.error('❌ OpenAI API Key missing')
               return {
                 success: false,
                 message: message,
                 reply: null,
-                error: 'OpenAI API Key 未配置，请在Workers环境变量中设置OPENAI_API_KEY',
+                error: 'OpenAI API Key 未配置。请检查Workers环境变量OPENAI_API_KEY',
                 usage: null
               }
             }
             result = await callOpenAI(message, model, apiKey, temperature, maxTokens)
           } else if (modelConfig.provider === 'deepseek') {
-            const apiKey = env.DEEPSEEK_API_KEY
+            const apiKey = env?.DEEPSEEK_API_KEY
+            console.log('🔍 DeepSeek Key check:', {
+              exists: !!apiKey,
+              type: typeof apiKey,
+              length: apiKey ? apiKey.length : 0,
+              startsWithSk: apiKey ? apiKey.startsWith('sk-') : false
+            })
+            
             if (!apiKey) {
-              console.error('❌ DeepSeek API Key missing')
               return {
                 success: false,
                 message: message,
                 reply: null,
-                error: 'DeepSeek API Key 未配置，请在Workers环境变量中设置DEEPSEEK_API_KEY',
+                error: 'DeepSeek API Key 未配置。请检查Workers环境变量DEEPSEEK_API_KEY',
                 usage: null
               }
             }
@@ -259,6 +299,12 @@ const yoga = createYoga({
   schema,
   context: async ({ request, env }) => {
     console.log('🌍 Creating GraphQL context for:', request.method)
+    console.log('🔧 Environment passed to context:', {
+      envType: typeof env,
+      envKeys: Object.keys(env || {}),
+      hasOpenAI: !!env?.OPENAI_API_KEY,
+      hasDeepSeek: !!env?.DEEPSEEK_API_KEY
+    })
     return { request, env }
   },
   cors: {
@@ -284,6 +330,13 @@ export default {
       method: request.method,
       pathname: url.pathname,
       origin: request.headers.get('origin')
+    })
+    
+    console.log('🔧 Environment at fetch level:', {
+      envType: typeof env,
+      envKeys: Object.keys(env || {}),
+      hasOpenAI: !!env?.OPENAI_API_KEY,
+      hasDeepSeek: !!env?.DEEPSEEK_API_KEY
     })
     
     try {
