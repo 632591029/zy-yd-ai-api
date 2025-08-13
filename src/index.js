@@ -71,6 +71,8 @@ const AI_MODELS = [
 
 // OpenAI API 调用
 async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens = 1000) {
+  console.log('🤖 Calling OpenAI API:', { model, messageLength: message.length })
+  
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -88,9 +90,11 @@ async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens =
   const data = await response.json()
   
   if (!response.ok) {
-    throw new Error(data.error?.message || 'OpenAI API error')
+    console.error('❌ OpenAI API Error:', data)
+    throw new Error(data.error?.message || `OpenAI API error: ${response.status}`)
   }
 
+  console.log('✅ OpenAI API Success')
   return {
     reply: data.choices[0].message.content,
     usage: {
@@ -103,6 +107,8 @@ async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens =
 
 // DeepSeek API 调用
 async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens = 1000) {
+  console.log('🧠 Calling DeepSeek API:', { model, messageLength: message.length })
+  
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: {
@@ -120,9 +126,11 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens
   const data = await response.json()
   
   if (!response.ok) {
-    throw new Error(data.error?.message || 'DeepSeek API error')
+    console.error('❌ DeepSeek API Error:', data)
+    throw new Error(data.error?.message || `DeepSeek API error: ${response.status}`)
   }
 
+  console.log('✅ DeepSeek API Success')
   return {
     reply: data.choices[0].message.content,
     usage: {
@@ -136,28 +144,51 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens
 // GraphQL Resolvers
 const resolvers = {
   Query: {
-    hello: () => 'Hello from ZY-YD AI API!',
-    models: () => AI_MODELS
+    hello: () => {
+      console.log('📞 Hello query called')
+      return 'Hello from ZY-YD AI API!'
+    },
+    models: () => {
+      console.log('📋 Models query called')
+      return AI_MODELS
+    }
   },
   Mutation: {
     sendMessage: async (parent, { input }, context) => {
+      console.log('🚀 SendMessage mutation called:', { 
+        model: input.model, 
+        messageLength: input.message?.length 
+      })
+      
       try {
         const { message, model, temperature = 0.7, maxTokens = 1000 } = input
         const { env } = context
 
+        // 检查环境变量（不打印完整密钥）
+        console.log('🔑 API Keys check:', {
+          hasOpenAI: !!env.OPENAI_API_KEY,
+          hasDeepSeek: !!env.DEEPSEEK_API_KEY,
+          openaiLength: env.OPENAI_API_KEY ? env.OPENAI_API_KEY.length : 0,
+          deepseekLength: env.DEEPSEEK_API_KEY ? env.DEEPSEEK_API_KEY.length : 0
+        })
+
         // 根据模型选择 API
         const modelConfig = AI_MODELS.find(m => m.id === model)
         if (!modelConfig) {
+          console.error('❌ Model not found:', model)
           return {
             success: false,
-            error: '不支持的模型'
+            error: `不支持的模型: ${model}`
           }
         }
+
+        console.log('📦 Using model:', modelConfig)
 
         let result
         if (modelConfig.provider === 'openai') {
           const apiKey = env.OPENAI_API_KEY
           if (!apiKey) {
+            console.error('❌ OpenAI API Key missing')
             return {
               success: false,
               error: 'OpenAI API Key 未配置'
@@ -167,6 +198,7 @@ const resolvers = {
         } else if (modelConfig.provider === 'deepseek') {
           const apiKey = env.DEEPSEEK_API_KEY
           if (!apiKey) {
+            console.error('❌ DeepSeek API Key missing')
             return {
               success: false,
               error: 'DeepSeek API Key 未配置'
@@ -174,12 +206,14 @@ const resolvers = {
           }
           result = await callDeepSeek(message, model, apiKey, temperature, maxTokens)
         } else {
+          console.error('❌ Unsupported provider:', modelConfig.provider)
           return {
             success: false,
-            error: '不支持的提供商'
+            error: `不支持的提供商: ${modelConfig.provider}`
           }
         }
 
+        console.log('🎉 Mutation completed successfully')
         return {
           success: true,
           message: message,
@@ -187,7 +221,7 @@ const resolvers = {
           usage: result.usage
         }
       } catch (error) {
-        console.error('AI API Error:', error)
+        console.error('💥 SendMessage error:', error.message)
         return {
           success: false,
           error: error.message || '服务器内部错误'
@@ -201,7 +235,10 @@ const resolvers = {
 const yoga = createYoga({
   schema: buildSchema(typeDefs),
   rootValue: resolvers,
-  context: ({ request, env }) => ({ request, env }),
+  context: ({ request, env }) => {
+    console.log('🌍 Creating GraphQL context')
+    return { request, env }
+  },
   cors: {
     origin: [
       'https://zy-yd-ai-tools.pages.dev',
@@ -219,6 +256,26 @@ const yoga = createYoga({
 
 export default {
   async fetch(request, env, ctx) {
-    return yoga.fetch(request, { env, ctx })
+    console.log('🌐 Workers fetch:', request.method, new URL(request.url).pathname)
+    
+    try {
+      return await yoga.fetch(request, { env, ctx })
+    } catch (error) {
+      console.error('💥 Workers fetch error:', error)
+      return new Response(
+        JSON.stringify({ 
+          error: 'Workers Error', 
+          message: error.message,
+          stack: error.stack 
+        }), 
+        { 
+          status: 500, 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          } 
+        }
+      )
+    }
   }
 }
