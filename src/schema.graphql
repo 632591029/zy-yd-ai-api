@@ -1,0 +1,59 @@
+type Query {
+  "获取问候信息"
+  hello: String
+  "获取可用的AI模型列表"
+  models: [AIModel!]!
+}
+
+type Mutation {
+  "发送消息给AI模型"
+  sendMessage(input: ChatInput!): ChatResponse!
+}
+
+"AI模型信息"
+type AIModel {
+  "模型ID"
+  id: String!
+  "模型名称"
+  name: String!
+  "提供商"
+  provider: String!
+  "模型描述"
+  description: String
+}
+
+"聊天输入参数"
+input ChatInput {
+  "用户消息"
+  message: String!
+  "使用的模型ID"
+  model: String!
+  "温度参数 (0-1)"
+  temperature: Float
+  "最大token数"
+  maxTokens: Int
+}
+
+"聊天响应"
+type ChatResponse {
+  "请求是否成功"
+  success: Boolean!
+  "用户的原始消息"
+  message: String
+  "AI的回复"
+  reply: String
+  "错误信息"
+  error: String
+  "使用情况统计"
+  usage: Usage
+}
+
+"Token使用统计"
+type Usage {
+  "提示token数量"
+  promptTokens: Int
+  "完成token数量"
+  completionTokens: Int
+  "总token数量"
+  totalTokens: Int
+}

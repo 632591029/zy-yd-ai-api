@@ -1,0 +1,19 @@
+{
+  "name": "zy-yd-ai-api",
+  "version": "1.0.0",
+  "description": "AI聊天工具的GraphQL API后端，基于Cloudflare Workers",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "start": "wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20231025.0",
+    "wrangler": "^3.78.12"
+  },
+  "dependencies": {
+    "graphql": "^16.8.1",
+    "graphql-yoga": "^5.7.0"
+  }
+}
