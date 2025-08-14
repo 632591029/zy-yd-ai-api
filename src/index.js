@@ -84,14 +84,17 @@ const schema = createSchema({
         
         try {
           const { input } = args
-          const { message, model, temperature = 0.7, maxTokens = 1000 } = input
+          const { message, model, temperature, maxTokens } = input
           const { env } = context
+
+          // 根据模型优化默认参数
+          const optimizedParams = getOptimizedParams(model, temperature, maxTokens)
 
           console.log('📝 Processing message:', {
             model,
             messageLength: message.length,
-            temperature,
-            maxTokens
+            temperature: optimizedParams.temperature,
+            maxTokens: optimizedParams.maxTokens
           })
 
           // 详细的环境变量检查
@@ -140,7 +143,7 @@ const schema = createSchema({
                 usage: null
               }
             }
-            result = await callOpenAI(message, model, apiKey, temperature, maxTokens)
+            result = await callOpenAI(message, model, apiKey, optimizedParams.temperature, optimizedParams.maxTokens)
           } else if (modelConfig.provider === 'deepseek') {
             const apiKey = env?.DEEPSEEK_API_KEY
             console.log('🔍 DeepSeek Key check:', {
@@ -159,7 +162,7 @@ const schema = createSchema({
                 usage: null
               }
             }
-            result = await callDeepSeek(message, model, apiKey, temperature, maxTokens)
+            result = await callDeepSeek(message, model, apiKey, optimizedParams.temperature, optimizedParams.maxTokens)
           } else {
             console.error('❌ Unsupported provider:', modelConfig.provider)
             return {
@@ -194,6 +197,23 @@ const schema = createSchema({
   }
 })
 
+// 根据模型优化参数
+function getOptimizedParams(model, temperature, maxTokens) {
+  // DeepSeek 优化参数
+  if (model.includes('deepseek')) {
+    return {
+      temperature: temperature !== undefined ? temperature : 0.3, // 降低随机性，提高响应速度
+      maxTokens: maxTokens !== undefined ? maxTokens : 800 // 减少输出长度
+    }
+  }
+  
+  // OpenAI 默认参数
+  return {
+    temperature: temperature !== undefined ? temperature : 0.7,
+    maxTokens: maxTokens !== undefined ? maxTokens : 1000
+  }
+}
+
 // AI 模型配置
 const AI_MODELS = [
   {
@@ -212,19 +232,19 @@ const AI_MODELS = [
     id: 'deepseek-chat',
     name: 'DeepSeek Chat',
     provider: 'deepseek',
-    description: 'DeepSeek的对话模型'
+    description: 'DeepSeek的对话模型 (已优化速度)'
   },
   {
     id: 'deepseek-coder',
     name: 'DeepSeek Coder',
     provider: 'deepseek',
-    description: 'DeepSeek的代码生成模型'
+    description: 'DeepSeek的代码生成模型 (已优化速度)'
   }
 ]
 
 // OpenAI API 调用
 async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens = 1000) {
-  console.log('🤖 Calling OpenAI API:', { model, messageLength: message.length })
+  console.log('🤖 Calling OpenAI API:', { model, messageLength: message.length, temperature, maxTokens })
   
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -258,9 +278,29 @@ async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens =
   }
 }
 
-// DeepSeek API 调用
-async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens = 1000) {
-  console.log('🧠 Calling DeepSeek API:', { model, messageLength: message.length })
+// DeepSeek API 调用 - 优化版本
+async function callDeepSeek(message, model, apiKey, temperature = 0.3, maxTokens = 800) {
+  console.log('🧠 Calling DeepSeek API (Optimized):', { 
+    model, 
+    messageLength: message.length, 
+    temperature, 
+    maxTokens 
+  })
+  
+  // 优化的请求体
+  const requestBody = {
+    model: model,
+    messages: [{ role: 'user', content: message }],
+    temperature: temperature,
+    max_tokens: maxTokens,
+    // DeepSeek 特定优化参数
+    top_p: 0.8, // 控制输出的多样性，较低值提高速度
+    frequency_penalty: 0.1, // 减少重复，提高效率
+    presence_penalty: 0.1, // 鼓励新话题，避免冗长
+    stop: null // 明确设置停止条件
+  }
+
+  console.log('🔧 DeepSeek request params:', requestBody)
   
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
@@ -268,12 +308,7 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      model: model,
-      messages: [{ role: 'user', content: message }],
-      temperature: temperature,
-      max_tokens: maxTokens
-    })
+    body: JSON.stringify(requestBody)
   })
 
   const data = await response.json()
@@ -283,7 +318,7 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.7, maxTokens
     throw new Error(data.error?.message || `DeepSeek API error: ${response.status}`)
   }
 
-  console.log('✅ DeepSeek API Success')
+  console.log('✅ DeepSeek API Success (Optimized)')
   return {
     reply: data.choices[0].message.content,
     usage: {
