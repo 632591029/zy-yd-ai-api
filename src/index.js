@@ -197,13 +197,13 @@ const schema = createSchema({
   }
 })
 
-// 根据模型优化参数
+// 根据模型优化参数 - 更激进的优化
 function getOptimizedParams(model, temperature, maxTokens) {
-  // DeepSeek 优化参数
+  // DeepSeek 激进优化参数 - 专注速度
   if (model.includes('deepseek')) {
     return {
-      temperature: temperature !== undefined ? temperature : 0.3, // 降低随机性，提高响应速度
-      maxTokens: maxTokens !== undefined ? maxTokens : 800 // 减少输出长度
+      temperature: temperature !== undefined ? temperature : 0.1, // 极低随机性
+      maxTokens: maxTokens !== undefined ? maxTokens : 500 // 大幅减少输出长度
     }
   }
   
@@ -214,8 +214,20 @@ function getOptimizedParams(model, temperature, maxTokens) {
   }
 }
 
-// AI 模型配置
+// AI 模型配置 - 移除可能的推理模型
 const AI_MODELS = [
+  {
+    id: 'deepseek-chat',
+    name: 'DeepSeek Chat (Fast)',
+    provider: 'deepseek',
+    description: 'DeepSeek的快速对话模型，无推理过程'
+  },
+  {
+    id: 'deepseek-coder',
+    name: 'DeepSeek Coder (Fast)',
+    provider: 'deepseek',
+    description: 'DeepSeek的快速代码模型，无推理过程'
+  },
   {
     id: 'gpt-3.5-turbo',
     name: 'GPT-3.5 Turbo',
@@ -227,18 +239,6 @@ const AI_MODELS = [
     name: 'GPT-4',
     provider: 'openai', 
     description: 'OpenAI的最强模型'
-  },
-  {
-    id: 'deepseek-chat',
-    name: 'DeepSeek Chat',
-    provider: 'deepseek',
-    description: 'DeepSeek的对话模型 (已优化速度)'
-  },
-  {
-    id: 'deepseek-coder',
-    name: 'DeepSeek Coder',
-    provider: 'deepseek',
-    description: 'DeepSeek的代码生成模型 (已优化速度)'
   }
 ]
 
@@ -278,29 +278,40 @@ async function callOpenAI(message, model, apiKey, temperature = 0.7, maxTokens =
   }
 }
 
-// DeepSeek API 调用 - 优化版本
-async function callDeepSeek(message, model, apiKey, temperature = 0.3, maxTokens = 800) {
-  console.log('🧠 Calling DeepSeek API (Optimized):', { 
+// DeepSeek API 调用 - 超激进优化版本
+async function callDeepSeek(message, model, apiKey, temperature = 0.1, maxTokens = 500) {
+  console.log('🧠 Calling DeepSeek API (Ultra Fast Mode):', { 
     model, 
     messageLength: message.length, 
     temperature, 
     maxTokens 
   })
   
-  // 优化的请求体
+  // 超激进的请求体 - 专注速度
   const requestBody = {
     model: model,
-    messages: [{ role: 'user', content: message }],
+    messages: [
+      {
+        role: 'system',
+        content: '你是一个快速响应的AI助手。请直接回答问题，不需要详细解释或思考过程。保持回答简洁明了。'
+      },
+      { 
+        role: 'user', 
+        content: message 
+      }
+    ],
     temperature: temperature,
     max_tokens: maxTokens,
-    // DeepSeek 特定优化参数
-    top_p: 0.8, // 控制输出的多样性，较低值提高速度
-    frequency_penalty: 0.1, // 减少重复，提高效率
-    presence_penalty: 0.1, // 鼓励新话题，避免冗长
-    stop: null // 明确设置停止条件
+    // 极速优化参数
+    top_p: 0.5, // 大幅降低多样性，提高速度
+    frequency_penalty: 0.3, // 强力减少重复
+    presence_penalty: 0.3, // 强力避免冗长
+    stop: ['\n\n', '###', '---'], // 多个停止条件，尽早结束
+    // 移除可能导致推理的参数
+    stream: false
   }
 
-  console.log('🔧 DeepSeek request params:', requestBody)
+  console.log('🔧 DeepSeek ultra-fast request params:', requestBody)
   
   const response = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
@@ -318,9 +329,22 @@ async function callDeepSeek(message, model, apiKey, temperature = 0.3, maxTokens
     throw new Error(data.error?.message || `DeepSeek API error: ${response.status}`)
   }
 
-  console.log('✅ DeepSeek API Success (Optimized)')
+  console.log('✅ DeepSeek API Success (Ultra Fast)')
+  
+  let reply = data.choices[0].message.content
+
+  // 移除可能的思考标签
+  reply = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  reply = reply.replace(/【思考】[\s\S]*?【\/思考】/gi, '').trim()
+  reply = reply.replace(/\*思考\*[\s\S]*?\*\/思考\*/gi, '').trim()
+  
+  // 如果回复为空，提供默认回复
+  if (!reply) {
+    reply = '我明白了，有什么其他问题吗？'
+  }
+
   return {
-    reply: data.choices[0].message.content,
+    reply: reply,
     usage: {
       promptTokens: data.usage.prompt_tokens,
       completionTokens: data.usage.completion_tokens,
